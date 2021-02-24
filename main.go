@@ -1,9 +1,10 @@
 package main
 
 import (
-	"fmt"
+	log "github.com/Sirupsen/logrus"
 	"io/ioutil"
 	"net/http"
+	_ "net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -31,26 +32,47 @@ func readQueryParam(r *http.Request, queryParamName string, queryParamDefaultVal
 }
 
 func handleFunc(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("Req: %s %s %s\n", r.Host, r.URL.Path, r.URL.Query())
+	log.Infof("---------------------")
+	bodySlice := readBody(r)
+	log.Infof("Req: %s %s \t  %s\n%s\n", r.Host, r.URL.Path, r.URL.Query(), strings.Join(bodySlice[:], "\n"))
 
 	resCode := readQueryParam(r, "resCode", "200")
 	resCodeInt, err := strconv.Atoi(resCode)
 	if err != nil {
-		fmt.Printf("Error converting resCode '%s' to int", resCode)
+		log.Errorf("Error converting resCode '%s' to int: %v", resCode, err)
 	}
 	w.WriteHeader(resCodeInt)
 
 	resDelay := readQueryParam(r, "resDelay", "100")
 	resDelayInt, err := strconv.Atoi(resDelay)
 	if err != nil {
-		fmt.Printf("Error converting resDelay '%s' to int", resDelay)
+		log.Errorf("Error converting resDelay '%s' to int: %v", resDelay, err)
+	} else {
+		time.Sleep(time.Duration(resDelayInt) * time.Millisecond)
 	}
-	time.Sleep(time.Duration(resDelayInt) * time.Millisecond)
 
-	// read body as []string  (maybe empty)
-	bodySlice := readBody(r)
+	freqBody_multilinestring := strings.Join(bodySlice[1:], "\n")
+	//freqBody_multilinestring_urlencoded := url.QueryEscape(freqBody_multilinestring)
+	freqUrl := bodySlice[0]
+	freqContentType := "application/x-www-form-urlencoded"
+	log.Infof(">> FwReq: %s \n%s\n", freqUrl, freqBody_multilinestring)
+	fres, err := http.Post(
+		freqUrl,
+		freqContentType,
+		strings.NewReader(freqBody_multilinestring),
+	)
+	if err != nil {
+		log.Errorf("Error with forward-request to '%s': %v", freqUrl, err)
+		return
+	}
+	fresBody, err := ioutil.ReadAll(fres.Body)
+	if err != nil {
+		log.Errorf("Error with forward-response body: %v", err)
+		return
+	}
+	log.Infof("Sending back response\n")
+	w.Write(fresBody)
 
-	fmt.Println(bodySlice[0])
 }
 
 func main() {
@@ -69,6 +91,6 @@ func main() {
 	// the *default router* in the `net/http` package and
 	// takes a function as an argument.
 	http.HandleFunc("/", handleFunc)
-	fmt.Println("== Listening on :8080")
+	log.Info("== Listening on :8080")
 	http.ListenAndServe(":8080", nil)
 }
